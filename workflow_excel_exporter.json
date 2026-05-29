@@ -1,0 +1,155 @@
+{
+  "name": "ICAG CallIQ \u2014 Excel Exporter",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "export-excel",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "export-webhook",
+      "name": "Webhook \u2014 Export Request",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "notes": "Query params: batch_id (optional), date_from, date_to"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://bizjldaymwueuitqybxg.supabase.co/rest/v1/calls?status=eq.done{{ $json.query.batch_id ? '&batch_id=eq.' + $json.query.batch_id : '' }}&order=created_at.desc&select=sf_number,lead_name,phone_number,recording_link,mp3_url,transcript,summary,program,course,college_interested,walkin_interested,walkin_date,follow_up_required,call_status,call_type,team_name,sentiment,quality_category,score,action_items,discussion_points,objections,interest_level",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        },
+        "options": {},
+        "nodeCredentialType": "supabaseApi"
+      },
+      "id": "fetch-calls",
+      "name": "Fetch processed calls",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build flat rows for Excel\nconst rows = $input.all();\nconst flat = rows.map(item => {\n  const d = item.json;\n  return {\n    'SF Number': d.sf_number || '',\n    'Lead Name': d.lead_name || '',\n    'Phone': d.phone_number || '',\n    'Recording Link': d.recording_link || '',\n    'MP3 File URL': d.mp3_url || '',\n    'Team Name': d.team_name || '',\n    'Call Type': d.call_type || '',\n    'Call Status': d.call_status || '',\n    'Program': d.program || '',\n    'Course': d.course || '',\n    'College Interested': d.college_interested ? 'Yes' : 'No',\n    'Walk-in Interested': d.walkin_interested ? 'Yes' : 'No',\n    'Walk-in Date': d.walkin_date || '',\n    'Interest Level': d.interest_level || '',\n    'Follow-up Required': d.follow_up_required ? 'Yes' : 'No',\n    'Sentiment': d.sentiment || '',\n    'Quality Category': d.quality_category || '',\n    'Score (/100)': d.score || '',\n    'Summary': d.summary || '',\n    'Action Items': (d.action_items || []).join('; '),\n    'Discussion Points': (d.discussion_points || []).join('; '),\n    'Objections': (d.objections || []).join('; '),\n    'Transcript': (d.transcript || '').substring(0, 5000)\n  };\n});\n\nreturn flat.map(row => ({ json: row }));"
+      },
+      "id": "flatten-rows",
+      "name": "Flatten for Excel",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "toFile",
+        "fileFormat": "xlsx",
+        "options": {
+          "sheetName": "Call Analysis Report",
+          "headerRow": true
+        }
+      },
+      "id": "build-excel",
+      "name": "Build Excel file",
+      "type": "n8n-nodes-base.spreadsheetFile",
+      "typeVersion": 2,
+      "position": [
+        860,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Disposition",
+                "value": "=attachment; filename=\"CallIQ_Report_{{ new Date().toISOString().split('T')[0] }}.xlsx\""
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              }
+            ]
+          }
+        }
+      },
+      "id": "send-excel",
+      "name": "Send Excel download",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1060,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook \u2014 Export Request": {
+      "main": [
+        [
+          {
+            "node": "Fetch processed calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch processed calls": {
+      "main": [
+        [
+          {
+            "node": "Flatten for Excel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Flatten for Excel": {
+      "main": [
+        [
+          {
+            "node": "Build Excel file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Excel file": {
+      "main": [
+        [
+          {
+            "node": "Send Excel download",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [
+    "icag",
+    "calliq",
+    "export"
+  ]
+}

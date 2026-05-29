@@ -1,0 +1,614 @@
+{
+  "name": "ICAG CallIQ \u2014 Call Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "process-calls",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook \u2014 Receive Batch",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "notes": "Receives: { batch_id, calls: [{id, sf_number, lead_name, recording_link, team_name, call_type}] }"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"status\": \"accepted\", \"batch_id\": \"{{ $json.batch_id }}\" }",
+        "options": {}
+      },
+      "id": "immediate-response",
+      "name": "Respond 202 Accepted",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        460,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "calls",
+        "options": {}
+      },
+      "id": "split-calls",
+      "name": "Split into individual calls",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        460,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "id": "batch-limiter",
+      "name": "Process 5 at a time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        660,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://bizjldaymwueuitqybxg.supabase.co/rest/v1/calls?id=eq.{{ $json.id }}",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "downloading"
+            },
+            {
+              "name": "processing_started",
+              "value": "={{ new Date().toISOString() }}"
+            }
+          ]
+        },
+        "options": {},
+        "nodeCredentialType": "supabaseApi"
+      },
+      "id": "mark-downloading",
+      "name": "Mark: downloading",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        860,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $json.recording_link }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file",
+              "outputPropertyName": "audio_data"
+            }
+          }
+        }
+      },
+      "id": "download-audio",
+      "name": "Download audio file",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1060,
+        380
+      ],
+      "notes": "Downloads the raw audio from Superfone/recording URL"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://bizjldaymwueuitqybxg.supabase.co/storage/v1/object/call-recordings/{{ $json.sf_number }}_{{ $json.id }}.mp3",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "audio/mpeg"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "audio_data",
+        "options": {},
+        "nodeCredentialType": "supabaseApi"
+      },
+      "id": "upload-supabase",
+      "name": "Upload MP3 to Supabase Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1260,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://bizjldaymwueuitqybxg.supabase.co/rest/v1/calls?id=eq.{{ $json.id }}",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "mp3_url",
+              "value": "=https://bizjldaymwueuitqybxg.supabase.co/storage/v1/object/public/call-recordings/{{ $('Split into individual calls').item.json.sf_number }}_{{ $('Split into individual calls').item.json.id }}.mp3"
+            },
+            {
+              "name": "status",
+              "value": "transcribing"
+            }
+          ]
+        },
+        "options": {},
+        "nodeCredentialType": "supabaseApi"
+      },
+      "id": "save-mp3-url",
+      "name": "Save MP3 URL to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1460,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "whisper-1"
+            },
+            {
+              "name": "response_format",
+              "value": "verbose_json"
+            },
+            {
+              "name": "language",
+              "value": ""
+            },
+            {
+              "name": "prompt",
+              "value": "This is an admissions call from an Indian college. The conversation may include English, Telugu, or Hindi. Speakers are a college counselor and a prospective student."
+            }
+          ]
+        },
+        "options": {},
+        "nodeCredentialType": "openAiApi"
+      },
+      "id": "whisper-transcribe",
+      "name": "Transcribe with Whisper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1660,
+        380
+      ],
+      "notes": "Whisper auto-detects Telugu, Hindi, English"
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://bizjldaymwueuitqybxg.supabase.co/rest/v1/rules?enabled=eq.true&order=priority.desc",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": []
+        },
+        "options": {},
+        "nodeCredentialType": "supabaseApi"
+      },
+      "id": "fetch-rules",
+      "name": "Fetch active AI rules",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1860,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"temperature\": 0.1,\n  \"response_format\": { \"type\": \"json_object\" },\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You are an expert Admissions Call QA Analyst for ICAG College, Hyderabad. Analyze the provided call transcript and extract structured information. Respond ONLY with valid JSON matching the exact schema provided. No markdown, no extra text.\\n\\nACTIVE RULES \u2014 apply these during analysis:\\n{{ $json.rules_text }}\\n\\nSCORING GUIDE (0-100):\\n90-100: Exceptional \u2014 student highly interested, confirmed walk-in, all details captured\\n70-89: Good \u2014 student interested, positive engagement, clear follow-up\\n50-69: Average \u2014 some interest shown, counselor covered basics\\n30-49: Below average \u2014 minimal engagement, poor counselor performance\\n0-29: Poor \u2014 no interest, missed opportunity, very poor quality\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"Call Metadata:\\nSF Number: {{ $('Split into individual calls').item.json.sf_number }}\\nLead Name: {{ $('Split into individual calls').item.json.lead_name }}\\nTeam: {{ $('Split into individual calls').item.json.team_name }}\\nCall Type: {{ $('Split into individual calls').item.json.call_type }}\\n\\nTranscript:\\n{{ $('Transcribe with Whisper').item.json.text }}\\n\\nExtract and return ONLY this JSON schema \u2014 fill every field, use null if not found:\\n{\\n  \\\"program\\\": \\\"string or null\\\",\\n  \\\"course\\\": \\\"string or null\\\",\\n  \\\"phone_number\\\": \\\"string or null\\\",\\n  \\\"college_interested\\\": \\\"boolean\\\",\\n  \\\"walkin_interested\\\": \\\"boolean\\\",\\n  \\\"walkin_date\\\": \\\"YYYY-MM-DD or null\\\",\\n  \\\"follow_up_required\\\": \\\"boolean\\\",\\n  \\\"call_status\\\": \\\"Answered|Missed|Busy|Not Connected|Unknown\\\",\\n  \\\"sentiment\\\": \\\"Positive|Neutral|Negative\\\",\\n  \\\"quality_category\\\": \\\"High Quality|Average|Poor|Very Poor\\\",\\n  \\\"score\\\": \\\"integer 0-100\\\",\\n  \\\"confidence_score\\\": \\\"float 0-1\\\",\\n  \\\"interest_level\\\": \\\"High|Medium|Low|None\\\",\\n  \\\"lead_qualified\\\": \\\"boolean\\\",\\n  \\\"summary\\\": \\\"2-3 sentence summary of the call\\\",\\n  \\\"action_items\\\": [\\\"list of specific next actions\\\"],\\n  \\\"discussion_points\\\": [\\\"key topics discussed\\\"],\\n  \\\"objections\\\": [\\\"concerns or objections raised by student\\\"]\\n}\"\n    }\n  ]\n}",
+        "options": {},
+        "nodeCredentialType": "openAiApi"
+      },
+      "id": "gpt-analyze",
+      "name": "GPT-4o \u2014 Analyze call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2060,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse GPT response and prepare Supabase update payload\nconst gptResponse = $input.item.json;\nconst callData = $('split-calls').item.json;\nconst transcript = $('whisper-transcribe').item.json;\n\nlet analysis = {};\ntry {\n  const content = gptResponse.choices[0].message.content;\n  analysis = JSON.parse(content);\n} catch(e) {\n  analysis = { error: e.message };\n}\n\nreturn {\n  json: {\n    // identifiers\n    call_id: callData.id,\n    sf_number: callData.sf_number,\n    // transcript\n    transcript: transcript.text || '',\n    // AI extracted fields\n    program: analysis.program || null,\n    course: analysis.course || null,\n    phone_number: analysis.phone_number || null,\n    college_interested: analysis.college_interested || false,\n    walkin_interested: analysis.walkin_interested || false,\n    walkin_date: analysis.walkin_date || null,\n    follow_up_required: analysis.follow_up_required || false,\n    call_status: analysis.call_status || 'Unknown',\n    sentiment: analysis.sentiment || 'Neutral',\n    quality_category: analysis.quality_category || 'Average',\n    score: parseInt(analysis.score) || 50,\n    confidence_score: parseFloat(analysis.confidence_score) || 0.5,\n    interest_level: analysis.interest_level || 'Low',\n    lead_qualified: analysis.lead_qualified || false,\n    summary: analysis.summary || '',\n    action_items: analysis.action_items || [],\n    discussion_points: analysis.discussion_points || [],\n    objections: analysis.objections || [],\n    raw_ai_json: analysis,\n    status: 'done',\n    processing_done: new Date().toISOString()\n  }\n};"
+      },
+      "id": "parse-response",
+      "name": "Parse GPT response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2260,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://bizjldaymwueuitqybxg.supabase.co/rest/v1/calls?id=eq.{{ $json.call_id }}",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "return=minimal"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {},
+        "nodeCredentialType": "supabaseApi"
+      },
+      "id": "save-results",
+      "name": "Save analysis to Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2460,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('parse-response').item.json.lead_qualified }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-qualified",
+      "name": "Is lead qualified?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2660,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.zohoapis.in/crm/v2/Leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Zoho-oauthtoken {{ $env.ZOHO_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"data\": [{\n    \"Last_Name\": \"{{ $('Split into individual calls').item.json.lead_name }}\",\n    \"Phone\": \"{{ $('parse-response').item.json.phone_number }}\",\n    \"Lead_Source\": \"Phone Call\",\n    \"Description\": \"{{ $('parse-response').item.json.summary }}\",\n    \"Lead_Status\": \"{{ $('parse-response').item.json.walkin_interested ? 'Walk-In Scheduled' : 'Contacted' }}\",\n    \"SF_Number__c\": \"{{ $('Split into individual calls').item.json.sf_number }}\",\n    \"AI_Score__c\": {{ $('parse-response').item.json.score }},\n    \"Sentiment__c\": \"{{ $('parse-response').item.json.sentiment }}\",\n    \"Course_Interested__c\": \"{{ $('parse-response').item.json.course }}\",\n    \"Walk_In_Date__c\": \"{{ $('parse-response').item.json.walkin_date }}\",\n    \"MP3_Recording__c\": \"{{ $('Split into individual calls').item.json.mp3_url }}\"\n  }]\n}",
+        "options": {}
+      },
+      "id": "zoho-push",
+      "name": "Push to Zoho CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2860,
+        300
+      ],
+      "notes": "Only pushes qualified leads to Zoho"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=https://bizjldaymwueuitqybxg.supabase.co/rest/v1/batches?id=eq.{{ $('Webhook \u2014 Receive Batch').item.json.body.batch_id }}",
+        "authentication": "predefinedCredentialType",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"done_rows\": { \"raw\": \"done_rows + 1\" } }",
+        "options": {},
+        "nodeCredentialType": "supabaseApi"
+      },
+      "id": "increment-batch",
+      "name": "Increment batch done count",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3060,
+        380
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook \u2014 Receive Batch": {
+      "main": [
+        [
+          {
+            "node": "Respond 202 Accepted",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Split into individual calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split into individual calls": {
+      "main": [
+        [
+          {
+            "node": "Process 5 at a time",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process 5 at a time": {
+      "main": [
+        [
+          {
+            "node": "Mark: downloading",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark: downloading": {
+      "main": [
+        [
+          {
+            "node": "Download audio file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download audio file": {
+      "main": [
+        [
+          {
+            "node": "Upload MP3 to Supabase Storage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload MP3 to Supabase Storage": {
+      "main": [
+        [
+          {
+            "node": "Save MP3 URL to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save MP3 URL to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Transcribe with Whisper",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe with Whisper": {
+      "main": [
+        [
+          {
+            "node": "Fetch active AI rules",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch active AI rules": {
+      "main": [
+        [
+          {
+            "node": "GPT-4o \u2014 Analyze call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GPT-4o \u2014 Analyze call": {
+      "main": [
+        [
+          {
+            "node": "Parse GPT response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse GPT response": {
+      "main": [
+        [
+          {
+            "node": "Save analysis to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save analysis to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Is lead qualified?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is lead qualified?": {
+      "main": [
+        [
+          {
+            "node": "Push to Zoho CRM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Increment batch done count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Push to Zoho CRM": {
+      "main": [
+        [
+          {
+            "node": "Increment batch done count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromAList",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": [
+    "icag",
+    "calliq",
+    "admissions"
+  ],
+  "notes": "Main call processing pipeline. Receives batch from backend API, processes each call through: download \u2192 upload \u2192 transcribe \u2192 analyse \u2192 save \u2192 Zoho."
+}
